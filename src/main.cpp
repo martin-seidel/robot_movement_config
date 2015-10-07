@@ -111,6 +111,14 @@ int main(int argc, char **argv)
 
 	ros::spin();
 
+	/*ros::Rate freq(1.0);
+	while (ros::ok())
+	{
+		ROS_INFO("spin");
+		ros::spinOnce();
+		freq.sleep();
+	}*/
+
 	plugin_node.reset();
 
 	/*dynamic_reconfigure::Server<plugin_demo_main::plugin_demoConfig> reconfServer;

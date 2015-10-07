@@ -3,10 +3,7 @@
 
 namespace robot_movement_config
 {
-	PluginInterface::PluginInterface()
-	{
-		init = false;
-	}
+	PluginInterface::PluginInterface():init(false) {}
 
 	void PluginInterface::initialize(ros::NodeHandle roshandle)
 	{
@@ -18,8 +15,11 @@ namespace robot_movement_config
 
 			getOdomRawSub = roshandle.subscribe("odom_raw", 2, &PluginInterface::getOdomRawCallback, this);
 
-			//pathPub = roshandle.advertise<nav_msgs::Path>("path", 10);
-			//sendPathTimer = roshandle.createTimer(ros::Duration(2.0), &PluginInterface::sendPathCallback, this);
+			jointStatePub = roshandle.advertise<sensor_msgs::JointState>("joint_states", 2);
+			tfSenderTimer = roshandle.createTimer(ros::Duration(0.2), &PluginInterface::tfSenderCallback, this);
+
+			last_pose.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
+			last_pose.setRotation( tf::createQuaternionFromYaw(0) );
 
 			onInit(roshandle);
 			init = true;
@@ -57,28 +57,78 @@ namespace robot_movement_config
 	}
 
 
-	void PluginInterface::sendPathCallback(const ros::TimerEvent& event)
+	void PluginInterface::tfSenderCallback(const ros::TimerEvent& event)
 	{
-		ROS_INFO("[interface] timer");
+		tf_bc.sendTransform(tf::StampedTransform(last_pose, event.current_real, "odom", "base_link"));
 	}
 
 	void PluginInterface::getCmdVelCallback(const geometry_msgs::Twist& event) {
-
-		std::vector<wheel_velocity> vels=getWheelVelFromCmdVel(event);
-		for (wheel_velocity vel : vels) {
+		
+		std::vector<wheel_data> vels=getWheelVelFromCmdVel(event);
+		for (wheel_data vel : vels) {
 			std::vector<wheel_config>::iterator it = wheels.begin();
 			while (it->link.compare(vel.link) != 0 && it != wheels.end()) {it++;}
 			if (it != wheels.end()) {
 				std_msgs::Float64Ptr msg(new std_msgs::Float64);
-				msg->data = vel.velocity_mps / it->radius;
+				msg->data = vel.data / (it->radius * it->scale_velocity);
 				it->velocityPub.publish(msg);
-				ROS_DEBUG("set velocity for wheel on link \"%s\" to %.3lf rad/s", it->link.c_str(), msg->data);
+				ROS_DEBUG("set velocity for wheel on link \"%s\" to %.3lf rad/s (%.3lf m/s)", it->link.c_str(), msg->data * it->scale_velocity, vel.data);
 			}
 		}
 	}
 
 	void PluginInterface::getOdomRawCallback(const sensor_msgs::JointState& event) {
-		ROS_INFO("[interface] timer");
+		sensor_msgs::JointStatePtr joint_state_msg(new sensor_msgs::JointState);
+
+		joint_state_msg->header.frame_id = event.header.frame_id;
+		joint_state_msg->header.stamp = event.header.stamp; //ros::Time::now();
+
+		std::vector<wheel_data> odom_wheels;
+
+		for (size_t i = 0; i < event.name.size(); i++) {
+			joint_state_msg->name.push_back(event.name.at(i));
+			std::vector<wheel_config>::iterator it = wheels.begin();
+			bool found_wheel = true;
+			while (it < wheels.end() && found_wheel) {
+				if (it->link.compare(event.name.at(i)) != 0) {
+					if (it == wheels.end() - 1) {
+						found_wheel = false;
+					} else {
+						it++;
+					}
+				} else {
+					break;
+				}
+			}
+			if (found_wheel) {
+				joint_state_msg->position.push_back(event.position.at(i) * it->scale_position);
+				joint_state_msg->velocity.push_back(event.velocity.at(i) * it->scale_velocity);
+
+				odom_wheels.push_back({it->link, event.position.at(i) * it->scale_position * it->radius});
+
+				ROS_DEBUG("link \"%s\" at %.3lfm", it->link.c_str(), event.position.at(i) * it->scale_position * it->radius);
+			} else {
+				joint_state_msg->position.push_back(event.position.at(i));
+				joint_state_msg->velocity.push_back(event.velocity.at(i));
+				ROS_DEBUG("unknown link \"%s\"", event.name.at(i).c_str());
+			}
+			joint_state_msg->effort.push_back(event.effort.at(i));
+		}
+
+		jointStatePub.publish(joint_state_msg);
+
+		if (odom_wheels.size() > 0) {
+			geometry_msgs::Transform diff = getOdomDiff(odom_wheels);
+			//ROS_INFO("%.3lf %.3lf %.3lf",diff.translation.x, diff.translation.y,tf::getYaw(diff.rotation) );
+			double x_old = last_pose.getOrigin().x();
+			double y_old = last_pose.getOrigin().y();
+			double yaw_old = tf::getYaw(last_pose.getRotation());
+
+			last_pose.setOrigin( tf::Vector3(
+				x_old + cos(yaw_old) * diff.translation.x - sin(yaw_old) * diff.translation.y,
+				y_old + sin(yaw_old) * diff.translation.x + cos(yaw_old) * diff.translation.y, 0.0) );
+			last_pose.setRotation( tf::createQuaternionFromYaw(yaw_old + tf::getYaw(diff.rotation)) );
+		}
 	}
 
 }

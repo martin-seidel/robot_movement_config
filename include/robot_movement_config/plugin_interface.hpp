@@ -6,16 +6,22 @@
 #include "geometry_msgs/Twist.h"
 #include "sensor_msgs/JointState.h"
 #include "std_msgs/Float64.h"
+#include "geometry_msgs/Transform.h"
+#include <tf/transform_broadcaster.h>
+#include <math.h>
 
 namespace robot_movement_config
 {
 
 	class PluginInterface
 	{
-		ros::Timer sendPathTimer;
+		ros::Timer tfSenderTimer;
 		ros::Subscriber getCmdVelSub;
 		ros::Subscriber getOdomRawSub;
+		ros::Publisher jointStatePub;
 		bool init;	/**< true if initialized. **/
+		tf::TransformBroadcaster tf_bc;
+		tf::Transform last_pose;
 
 		struct wheel_config {
 			std::string link;
@@ -23,7 +29,7 @@ namespace robot_movement_config
 			//ros::Publisher position;
 			double scale_velocity; //multiply input with this to get radiant/s
 			double scale_position; //multiply input with this to get radiant
-			double radius;
+			double radius; //urdf!
 		};
 
 		std::vector<wheel_config> wheels;
@@ -31,17 +37,17 @@ namespace robot_movement_config
 	protected:
 		ros::NodeHandle roshandle;
 
-		struct wheel_velocity {
+		struct wheel_data {
 			std::string link;
-			double velocity_mps;
+			double data;
 		};
 
 	private:
 
-		/**call sendPath()
+		/**
 		 * @param event some time values
 		 **/
-		void sendPathCallback(const ros::TimerEvent& event);
+		void tfSenderCallback(const ros::TimerEvent& event);
 
 		void getCmdVelCallback(const geometry_msgs::Twist& event);
 
@@ -54,7 +60,9 @@ namespace robot_movement_config
 
 		bool addWheel(std::string link, std::string velocityPubTopic, double radius, double scale_velocity, double scale_position);
 
-		virtual std::vector<wheel_velocity> getWheelVelFromCmdVel(geometry_msgs::Twist cmd_vel) = 0;
+		virtual std::vector<wheel_data> getWheelVelFromCmdVel(geometry_msgs::Twist cmd_vel) = 0;
+
+		virtual geometry_msgs::Transform getOdomDiff(std::vector<wheel_data> current_position) = 0;
 
 		/** initialize #init
 		 **/

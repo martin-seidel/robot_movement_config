@@ -12,6 +12,7 @@ set(CMAKE_CXX_FLAGS "-std=c++0x ${CMAKE_CXX_FLAGS}")
 find_package(catkin REQUIRED COMPONENTS
   pluginlib
   roscpp
+  tf
 )
 
 ## System dependencies are found with CMake's conventions
@@ -106,7 +107,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES _rmc_interface
-  CATKIN_DEPENDS pluginlib roscpp
+  CATKIN_DEPENDS pluginlib roscpp tf
 #  DEPENDS system_lib
 )
 
